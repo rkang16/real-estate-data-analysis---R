@@ -1,0 +1,448 @@
+---
+title: "Real Estate Data Analysis"
+subtitle: " - Taking King County as an Example"
+author: "Rui Kang"
+date: "12/12/2020"
+output: 
+  html_document:
+    toc: yes
+    df_print: paged
+    highlight: pygments
+    number_sections: yes
+    theme: readable
+    toc_float:
+      collapsed: yes
+---
+
+
+```{r setup, include=FALSE}
+#Install essential packages
+#install.packages("DT")
+#install.packages("png")
+#install.packages("knitr")
+#install.packages("heatmaply")
+#install.packages("leaflet")
+#install.packages("ggpubr")
+
+#Load essential packages
+library(tidyverse)
+library(DT) # This package is for making a clean and interactive data table
+library(png) # This package is for show png format 
+library(knitr) # We use include_graphics in this package
+library(heatmaply) # For creating a heatmap
+library(leaflet) # This package allow us to create an interactive map and add map tiles
+library(ggpubr) # We will use this package and ggplotbar() to make a better visualization
+library(broom) # For regression
+
+```
+
+
+```{r Insert a picture, echo=FALSE}
+# From knitr package
+include_graphics("house.png")
+```
+
+# Abstract
+
+## Topic
+
+Our topic refers to the **real estate** industry. In this project, we will use King County as an example to examine prices rates and how the prices vary by some features. Then, we will use our data analysis to gain some business insight about real estate.
+
+## Motivation and Background
+
+Real estate has always been a worthwhile investment.However, changes in house prices are influenced by many factors.From an investor's business perspective, how to decide what properties are worth investing in is a question worth considering.
+
+According to an article on Wall Street Journal [link to source](https://www.wsj.com/articles/real-estate-is-now-about-location-location-isolation-11598966108?mod=searchresults_pos12&page=1), some attributes such as house size, bedrooms are not as significant as before. The location and community gradually become dominant factors.We searched online and found this article [link to source](https://www.opendoor.com/w/blog/factors-that-influence-home-value) which shows 8 critical factors that influence a home's value including neighborhood, location, upgrades, etc. 
+
+## Objectives
+We want to put ourselves in the shoes of real estate investors, both individuals and companies like Airbnb. They would love to maximize the profit of their properties. In order to do that, we have to spot the houses with highest growth potential to expand the market. To clarify that, we need to find the potential houses by analyzing the relationships between prices and other important variables of the houses.
+
+*__What factors will influence the house valuation?__*  
+*__What kind of houses are worth investing in__?*
+
+## Stakeholders
+Some stakeholders may find our data analysis is useful to their business and decision making. We created a **Stakeholder Analysis Worksheet** to show that:
+
+```{r stakeholdeers, echo=FALSE}
+Stakeholders <- c("Real estate business investors", "Airbnb Hosts", "Individual investors")
+Needs <- c("To know what features will influence the valuation of properties so that they can understand the market potentials", "To know what features will influence the valuation of properties so that they can set the price and know what kind of hosts can be popular and beneficial", "To know what features will influence the valuation of properties so that they can make wise investment")
+stake_list <- tibble(Stakeholders, Needs)
+datatable(head(stake_list), options = list(dom = 'tp',scrollX = TRUE))
+```
+
+
+
+## Hypothesis
+According to the research and thought process, we identified some our testable hypothesis as follow:
+
+1. If a property has all good features such as more bedroom, large basement, new built, etc., it will have a higher price.
+2. All features of a property will be good predictors of the level of market price.
+3. If some investors' properties have all features that seen as strongly relevant, then they will gain more profit on those properties in the future.
+
+## Plan
+Next, we will explore our data and try to find patterns by using explanatory data analysis method including a map that contain the distribution of the houses and their prices and some plots that show the potential relationship between features and price. In the last part, we will build a model that can show the relationship between price of the houses and features. Also, we will conduct a hypothesis test and make inference.
+
+# Data 
+
+## Data Source
+This dataset contains house sale prices for King County, which includes major cities such as Seattle. We decide to use this dataset because king county is pretty interesting. This area has a huge wealth disparity. Some of the world’s richest people live there, and yet 10% of the county’s residents live in poverty, which make it representative to most regions in the US or even the world.
+
+[Dataset URL](https://www.kaggle.com/harlfoxem/housesalesprediction)
+
+```{r load dataset, echo=FALSE, message=FALSE, warning=FALSE}
+#Load data and assign a name for it
+kchouse <- read_csv("kc_house_data.csv")
+
+#Show the first five rows
+datatable(head(kchouse,n=5), options = list(dom = 'tp',scrollX = TRUE))
+
+```
+
+
+## Variable Selection
+
+For variable selection, we created a interactive heatmap (you can point each area to see the value of correlation) for correlation between variables since we would like to know what factors will relevantly influence the house prices.
+
+```{r Heatmap for correlation, echo=FALSE}
+#Remove non-numerical variables for conveniently create heatmap
+ht = subset(kchouse, select = -c(id,date) )
+
+#Create a interactive heatmap
+heatmaply_cor(
+  cor(ht),
+  xlab = "Features", 
+  ylab = "Features",
+  k_col = 2, 
+  k_row = 2
+)
+```
+
+Based on our findings and visualizations, we decide to use the following variables because they have plausible correlations:    
+
+**_Notice_**: _We didn't choose sqft_basement and sqft_above because the sum of these two variables is the sqft_living. Therefore, we decide to use sqft_living to represent them. Also, we dropped some variables such as condition, yr_built, etc. which have very low correlations.
+
+**price**: House prices
+**bedrooms**: Number of bedrooms   
+**bathrooms**: Number of bathrooms  
+**sqft_living**: Footage of living space  
+**waterfront**: Is house has a view to a waterfront - "0" means no, "1" means yes  
+**floors**: Floors(levels) in house  
+**grade**: Overall grade given to the housing unit, based on King County grading system   
+**sqft_living15**: The square footage of interior housing living space for the nearest 15 neighbors 
+
+## Check Data Quality
+
+### Missing values
+
+We use the code below to show the number of missing values in our dataset. Then we get a result "0", which means there is no missing values in our dataset.
+
+```{r Missing values}
+# Use sum() to show the amount of missing values
+sum(is.na(kchouse))
+```
+
+### Outliers
+
+In this section, we decide to check if there are some outliers under our selected variables. The method we use is boxplot. Since some variables have their own traits, we will not have enough evidence or knowledge base to decide whether they should be removed. Therefore, we will test the variables that we have confidence to decide.
+
+Firstly, we will check the bedrooms column: 
+
+```{r bedrooms outlier check, echo=FALSE}
+boxplot(kchouse$bedrooms, xlab = "bedrooms", horizeontal = TRUE)
+```
+
+**Notice: According to the boxplot above, there is a house with 33 bedrooms. To decide whether this value should be dropped, we found the [house link](https://www.realtytrac.com/property/wa/seattle/98103/8033-corliss-ave-n/185383585/) and noticed that this value was a typo. Therefore, we decided to drop this observation.**
+
+```{r Remove the house with 33 bedrooms}
+#Remove the house with 33 bedrooms
+kchouse <- subset(kchouse, bedrooms!= 33)
+```
+
+secondly, we will check the bathrooms column:
+
+```{r bathrooms outlier check, echo=FALSE}
+boxplot(kchouse$bathrooms, xlab = "bathrooms", horizeontal = TRUE)
+```
+
+Lastly, let's check the grade column:
+
+```{r grade outlier check}
+boxplot(kchouse$grade, xlab = "grade", horizeontal = TRUE)
+```
+
+Indeed, there are many outliers in our data. We used boxplot to visualize and identify them. We decided to keep them all except the house with 33 bedrooms, because other data do not seem to be mismeasured or randomly generated. For example, the housing prices are similar to stock prices, both parties had intentions to agree on such price levels. It is truly how trade happens and how the prices were recorded.
+
+# Exploratory data analysis
+
+In this part, we will make some plots to find potential patterns that will be plausible to our hypothesis. 
+
+## Price Distribution
+
+At first, we will show the distribution of price which is the most important criteria. We want to know if it is a normal distribution and whether it is good enough for our follow-up analysis.
+
+```{r distribution of Price, echo=FALSE}
+ggplot(data=kchouse, aes(x=price)) +
+  geom_density(fill="skyblue") +
+  labs(title = "Price Distribution")
+```
+
+We can see that the price distribution is right skewed. To find the relationship between data more easily for coming analysis and modelling, we decide to use **log(price)**. First, we calculated the log price and create a new variable for it in the dataset kchouse and then plot the new column.
+
+```{r add log price, echo=FALSE}
+# Add log_price to dataset
+kchouse <- kchouse %>% 
+  mutate(log_price = log(price))
+
+# Show new distribution
+ggplot(kchouse,aes(x=log_price)) +
+  geom_density(fill="skyblue")
+```
+
+Now, the distribution is more like a normal distribution.
+
+## Price Variaty Map
+
+Here, we use a interactive map to showcase price distribution with different color. This map clearly shows that different locations of houses have different prices. For example, houses near airport have the lowest level of price. However, houses near lakes or in the suburb have higher prices. These findings fueled our thinking process about whether location factors such as waterfront can influence the house prices.
+
+```{r map, echo=FALSE}
+# Set the price bins
+kchouse$PriceBin<-cut(kchouse$price, c(0,250000,500000,750000,1000000,2000000,999000000))
+
+center_lon = median(kchouse$long,na.rm = TRUE)
+center_lat = median(kchouse$lat,na.rm = TRUE)
+
+# Set the color pallet for price bins
+color_bin <- colorFactor(c("#9b5de5","#f15bb5","#fee440","#00bbf9","#80ed99","#00f5d4"), 
+                       kchouse$PriceBin)
+
+# Add map tiles and dots
+leaflet(kchouse) %>% 
+  addProviderTiles("Esri.NatGeoWorldMap") %>%
+  addCircles(lng = ~long, lat = ~lat, 
+             color = ~color_bin(PriceBin))  %>%
+# controls
+setView(lng=center_lon, lat=center_lat,zoom = 12) %>%
+  addLegend("bottomleft", pal = color_bin, values = ~PriceBin,
+            title = "House Price Distribution by Color",
+            opacity = 1)
+```
+
+
+## Bedrooms and Price
+
+Based on the bar plot below, We can examine how the number of bedrooms influence the house price. The plot shows a pattern that house price will increase when the number of bedrooms increases from 1 bedroom to 8 bedrooms, which fits our first hypothesis. However, after 8 bedrooms, the prices decrease. Therefore, we have to conduct a deeper analysis to reveal the true relationship between bedrooms and price.
+
+```{r bedrooms, echo=FALSE, message=FALSE, warning=FALSE}
+kchouse %>% 
+  group_by(bedrooms) %>% # Group bedroom number
+  summarise(mean=mean(price)) %>% # Calculate mean of each group
+  ggbarplot(x="bedrooms",y="mean",fill = "bedrooms",palette = "Set4",size = 1.5)+ #Visualize it with a bar plot and use different colors for groups
+  scale_y_continuous(labels = scales::dollar,n.breaks = 15)+ # Scale y axis
+  theme(legend.position = "none")+ 
+  labs(title = " Price Average By Bedrooms") # Add a title
+  
+```
+
+## Bathrooms and Price
+
+Based on the bar plot below, We can examine how the number of bathrooms influence the house price. The plot shows a pattern that house price will increase when the number of bathrooms increases, which justified our first hypothesis and gives us a positive sense as well to continue our analysis.
+
+```{r bathrooms, echo=FALSE, message=FALSE, warning=FALSE}
+kchouse %>% 
+  group_by(bathrooms) %>% # Group bedroom number
+  summarise(mean=mean(price)) %>%  # Calculate mean of each group
+  ggbarplot(x="bathrooms",y="mean",fill = "bathrooms",palette = "Set4",size = 1.5)+ #Visualize it with a bar plot and use different colors for groups
+  scale_y_continuous(labels = scales::dollar,n.breaks = 15)+ # Scale y axis
+  theme(legend.position = "none",axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ # Don't show legends and flip the x-axis text for better view
+  labs(title = " Price Average By Bathrooms") # Add a title
+  
+```
+
+## Living space and Price
+
+The plot below is very important because it helps us to visualize how living space area will influence the house valuation. Based on this plot we found out that the correlation between living space area and house price is positive and quite strong. Therefore, we are looking forward to test it by using regression in the modeling part.
+
+```{r living space, echo=FALSE, message=FALSE, warning=FALSE}
+ggscatter(kchouse,"sqft_living","price",color = "purple",size=1,alpha=0.5)+ylim(70000,2000000)+
+  geom_smooth(method="lm",size=1.2,size=2, color="#ff9100")+
+  xlim(0,5000)+labs(x = 'Tooal living space', y = 'Price',title = "Price By living Space")+
+  scale_y_continuous(labels = scales::dollar,n.breaks = 10)+
+  coord_cartesian(y=c(0,2000000))
+```
+
+## Waterfront and Price
+
+Waterfront is a very interesting variable because we read about that people would like to pay more on houses with waterfront view in our findings. Therefore, we would like to test if the prices of waterfront houses are higher than houses without water view. The bar plot confirmed our hypothesis. The waterfront houses which represented by 1 have higher prices than non-waterfront houses which represented by 0.
+
+```{r waterfront, echo=FALSE, message=FALSE, warning=FALSE}
+kchouse %>% 
+  group_by(waterfront) %>% # group by waterfront
+  summarise(mean = mean(price)) %>% # calculate mean 
+  ggbarplot(x="waterfront",y="mean",fill = "waterfront",palette = "Set4",size = 1.5)+ #Visualize it with a bar plot and use different colors for groups
+  scale_y_continuous(labels = scales::dollar,n.breaks = 15)+ # Scale y axis
+  theme(legend.position = "none")+ # Don't show the legends
+  labs(title = " Price Average By Waterfront") # Add a title
+
+```
+
+## Floors and Price
+
+If you wonder what a 0.5 floor level is, that just means the roof is shaped with a slope and the usage of top floor is 50% less than the one without a slope. It is indeed an important factor if the buyers care about their houses being vertical enough. Although the top side doesn't show much. If you look at the plot below, the pattern is not as clear as others. Although, we can still tell that more floors means higher price.
+
+```{r floors, echo=FALSE, message=FALSE, warning=FALSE}
+kchouse %>% 
+  group_by(floors) %>% # group data by floors
+  summarise(mean = mean(price)) %>%  # calculate the mean of each group
+  ggbarplot(x="floors",y="mean",fill = "floors",palette = "Set4",size = 1.5)+ #Visualize it with a bar plot and use different colors for groups
+  scale_y_continuous(labels = scales::dollar,n.breaks = 15)+ # Scale y axis
+  theme(legend.position = "none")+ # Don't show legends
+  labs(title = " Price Average By Floors") # Add a title
+
+```
+
+## Grade and Price
+
+King County has their own grading system for houses. Higher grade indicates better architectural design, better materials, higher build quality,etc. From the bar plot below, we can clearly see the pattern which shows that the house price increases with the increase of the grade. There is no doubt that this plot matches our hypothesis before.
+
+```{r grade, echo=FALSE, message=FALSE, warning=FALSE}
+kchouse %>% 
+  group_by(grade) %>% # group data by grade
+  summarise(mean = mean(price)) %>%  # calculate the mean of each group
+  ggbarplot(x="grade",y="mean",fill = "grade",palette = "Set3",size = 1.5)+ #Visualize it with a bar plot and use different colors for groups
+  scale_y_continuous(labels = scales::dollar,n.breaks = 15)+ # Scale y axis
+  theme(legend.position = "none")+ # Don't show legends
+  labs(title = " Price Average By Grade") # Add a title
+
+```
+
+## sqrt_living15 and Price
+
+The square footage of interior housing living space for the **nearest 15 neighbors**.
+This chart is very important because it helps us to visualize two key points: First, the orange dots below the blue line shows the houses/units with cheaper prices if we look at prices individually. Second, there are some very expensive houses on the top. If we keep the x-value constant along with the expensive ones and check out the bottom y’s, we found the cheap houses with growth potential.
+
+```{r living space 15, echo=FALSE, message=FALSE, warning=FALSE}
+ggscatter(kchouse,"sqft_living15","price",color = "purple",size=1,alpha=0.5)+ylim(70000,2000000)+
+  geom_smooth(method="lm",size=1.2,size=2, color="#ff9100")+
+  xlim(0,5000)+labs(x = '15 Neighbors Average Living Space', y = 'Price',title = "Price By Average Living Space of 15 Neighbors")+
+  scale_y_continuous(labels = scales::dollar,n.breaks = 10)+
+  coord_cartesian(y=c(0,2000000))
+```
+
+# Update and Modifications
+
+In our hypothesis and thought process, we assume that the year of house built, house condition could be important factors to influence house price. However, after visualize the correlations between them and price, we noticing that some factors are not as significant as we thought before. Hence, we dropped some variables with extremely low correlation. 
+
+# Analysis plan
+
+In the next section, we decide to run some simple and multiple linear regressions and then take a closer look at the coefficients, adjusted R Square, p-value, residual, etc. Then, we will do a hypothesis test for the regression. In the end, we will find the best model in our case.
+
+# Modelling 
+
+## Simple Regression Check
+
+Firstly, the linear regression of single variable is done. Although sometimes the analysis of simple regression is not necessary and the results may not be reliable, it is still helpful to preliminary explore the relationship between independent variables and dependent variables.
+
+```{r test}
+summary(lm(log_price ~ bedrooms,kchouse))
+summary(lm(log_price ~ bathrooms,kchouse))
+summary(lm(log_price ~ sqft_living,kchouse))
+summary(lm(log_price ~ waterfront,kchouse))
+summary(lm(log_price ~ floors,kchouse))
+summary(lm(log_price ~ grade,kchouse))
+summary(lm(log_price ~ sqft_living15,kchouse))
+```
+
+
+
+## Multiple Regression 
+
+Here, we will use **log_price** as our dependent variable to reduce the probability of collinearity and heteroscedasticity. Then we will run a multiple regression as following:
+
+```{r regression}
+model <- lm(formula = log_price ~ bedrooms + bathrooms + sqft_living + waterfront + floors + grade + sqft_living15, data = kchouse)
+
+summary(model)
+```
+
+After simple and multiple regression analysis, there are some interesting points we find useful to enhance our model. Bathrooms and floors are statistically significant in simple regressions since their p-values are very close to 0. However, those two variables in multiple regression have very large p-value which indicate the effect is not statistically significant. Then we checked the correlation between those two variables and other independent variables. We found that bathrooms and floors have positive correlations with other independent variables such as sqrt_living, grade, etc, which means the effect of bathrooms and floors on dependent variable in univariate analysis also includes the positive effect of other variables. Hence, we will remove bathrooms and floors and built a new model. 
+
+```{r new model}
+new_model <- lm(formula = log_price ~ bedrooms + sqft_living + waterfront + grade + sqft_living15, data = kchouse)
+summary(new_model)
+```
+
+## Interpretation
+
+Now, we have the coefficients of our model:
+
+$$
+\begin{aligned}
+&\beta_0 = 1.125e+01 \\
+&\beta_1 = -1.550e-02 (bedrooms) \\
+&\beta_2 = 1.962e-04 (sqft_living)\\
+&\beta_3 = 6.061e-01 (waterfront)\\
+&\beta_4 = 1.692e-01 (grade)\\
+&\beta_5 = 7.170e-05 (sqft_living15)\\
+\end{aligned}
+$$
+
+First, the adjusted R Square is 0.5694. It means 56.94% of observation values can be explained by the fitted model.
+
+Since our dependent variable is **log_price**, we will interpret the coefficients in another way. For example, if the sqft_living increases by 1%, the house price will increase by 1.962e-04 percent. However, you can see that the coefficient of bedrooms is negative. We will still keep it because multiple regression is about the effect on price of many independent variables combined together. 
+
+## Hypothesis Test
+
+Now, we will analyze our model to see if it is good. First, we plan to conduct a hypothesis test. Our null and alternative hypothesis are shown below:  
+
+$$
+\begin{aligned}
+H_0 &: \beta_1 = \beta_2 = \beta_3 = \beta_4 = \beta_5= 0 \\
+H_A &: \beta_1 \neq \beta_2 \neq \beta_3 \neq \beta_4 \neq \beta_5 \neq 0
+\end{aligned}
+$$
+
+To reject null hypothesis, we will check the p-value of each variable. It turns out all p-values are very close to 0 which gave us strongly evidence to reject null hypothesis. Then, all the effects are statistically significant. Now, we can say those independent variables have relationships with dependent variable which is price.
+
+## Residuals Test
+
+We can see in the figure below that the residuals are close to the standard normal distribution.Since the mean value of the standard normal distribution is 0, it indicates that the fitting effect does not depend on some special values, so our regression model is reasonable.
+
+```{r residual}
+set.seed(123) 
+augment(new_model) %>% 
+  slice_sample(n=1000) %>% # Use sample instead of all data in dataset
+  ggplot(., aes(x=.resid)) +
+  geom_density(fill="skyblue")
+```
+
+
+# Conclusion
+
+In the above analysis, we identified a combination of factors that influenced the price of a house in King County, including the number of bedrooms, the size of living space, waterfront, the level of grade, and the average living space of 15 neighboring homes.In the first part, our assumptions are as follows:
+
+1. If a property has all good features such as more bedroom, large basement, new built, etc., it will have a higher price.
+2. All features of a property will be good predictors of the level of market price.
+3. If some investors' properties have all features that seen as strongly relevant, then they will gain more profit on those properties in the future.
+
+Now, we can say that our first hypothesis is not true because not all features will increase the valuation of houses. Therefore, the second one is also wrong because some of variables such as floors and bathrooms are not good predictors of the level of market price. The last hypothesis is true because we have justified some variables have strong effect on house prices. So, if the investors have properties with those relevant features, or we can say potentials for appreciation, they will make more profit. 
+
+# Key Insights
+
+Now, we can communicate with the stakeholders.
+
+1. For real estate business investors, they can invest on some properties in King County with large living space, waterfront view, a very high grade. Those properties will have huge potentials to appreciate. Then, they will gain more profit. For Airbnb hosts in King County, if their house have features that we mentioned, they have more power to increase their market price. Also, they can use those variables as their top features on Airbnb website and APP.
+
+2. For USD cash holders, we highly suggest that they park their money in King county houses with large living space, waterfront view and a very high grade. Because U.S. federal reserve is printing money at an unprecedented rate. And U.S. currency is worth less each day. Stock market is risky at all time highs. The safest and most crisis-proof way to store value is to convert cash into good assets (houses) with our filtered factors in King county.
+
+3. During the COVID period, rent went down while housing prices actually went up. Most public places are closed. This only magnifies our factors at greater scale. When public gyms are closed, a larger living space can convert into a home gym or activity/yoga space. When people are put into quarantine, a waterfront view helps the residents to remain contact with nature. When people stay home more often, a very high grade house offers durability and visual aesthetics to enhance the home experience. Just trust us, invest in real estate with our filtered factors and keep smiles up when the ship (economy) goes down.
+
+
+# References
+
+1.Forman, Laura. “Real Estate Is Now About Location, Location, Isolation.” Wall Street Journal, 1 Sept. 2020, www.wsj.com/articles/real-estate-is-now-about-location-location-isolation-11598966108?mod=searchresults_pos12&page=1. Accessed 9 Dec. 2020.
+
+2.“8 Critical Factors That Influence a Home’s Value | Opendoor.” Opendoor, 27 Mar. 2019, www.opendoor.com/w/blog/factors-that-influence-home-value.
+
+
+
+
